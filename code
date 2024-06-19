@@ -1,0 +1,65 @@
+import numpy as np
+import librosa
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, LSTM, Dense, Dropout, TimeDistributed
+from tensorflow.keras.utils import to_categorical
+
+# Load the dataset
+def load_data(data_path):
+    emotions = []
+    features = []
+    for root, _, files in os.walk(data_path):
+        for file in files:
+            if file.endswith(".wav"):
+                file_path = os.path.join(root, file)
+                emotion = root.split('/')[-1] # Assuming directory name is the label
+                y, sr = librosa.load(file_path, sr=None)
+                mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
+                features.append(mfccs)
+                emotions.append(emotion)
+    return np.array(features), np.array(emotions)
+
+# Define the path to your dataset
+data_path = 'path_to_your_dataset'
+X, y = load_data(data_path)
+
+# Encode the labels
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)
+y_onehot = to_categorical(y_encoded)
+
+# Pad sequences to ensure uniform input size
+X_padded = np.array([np.pad(x, ((0, 40 - x.shape[0]), (0, 0)), 'constant') for x in X])
+
+# Reshape for CNN input
+X_padded = X_padded[..., np.newaxis]
+
+# Split the data
+X_train, X_test, y_train, y_test = train_test_split(X_padded, y_onehot, test_size=0.2, random_state=42)
+
+# Build the model
+model = Sequential()
+model.add(TimeDistributed(Conv2D(32, (3, 3), activation='relu'), input_shape=(None, 40, 40, 1)))
+model.add(TimeDistributed(MaxPooling2D((2, 2))))
+model.add(TimeDistributed(Conv2D(64, (3, 3), activation='relu')))
+model.add(TimeDistributed(MaxPooling2D((2, 2))))
+model.add(TimeDistributed(Flatten()))
+model.add(LSTM(128, return_sequences=False))
+model.add(Dense(128, activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(len(le.classes_), activation='softmax'))
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2)
+
+# Evaluate the model
+test_loss, test_acc = model.evaluate(X_test, y_test)
+print(f'Test Accuracy: {test_acc}')
+
+# Save the model
+model.save('emotion_recognition_model.h5')
